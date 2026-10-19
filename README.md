@@ -93,15 +93,15 @@ wallet, mempool, miner, storage, and peer manager.
           |                    |                     |
   +-------v-------+    +-------v-------+     +-------v--------+
   | Blockchain &  |    | Miner and     |     | Peer manager & |
-  | transaction  |    | mempool       |     | consensus      |
+  | transaction   |    | mempool       |     | consensus      |
   | validation    |    +---------------+     +----------------+
   +-------+-------+                                  |
           |                                  HTTP peer gossip/sync
   +-------v-------+                                  |
   | JSON chain,  |                         +--------v--------+
   | wallet, peers|                         | Other PyChain   |
-  +---------------+                         | node processes  |
-                                             +-----------------+
+  +---------------+                        | node processes  |
+                                           +-----------------+
 ```
 
 The core package implements deterministic block and transaction rules. The
