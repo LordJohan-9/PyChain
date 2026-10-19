@@ -109,9 +109,7 @@ node layer coordinates persistence, mining, API calls, peer messaging, and
 fork resolution. Peer messages are bounded and rate-limited by the node's
 in-process P2P middleware.
 
-See [docs/CONCEPTS.md](docs/CONCEPTS.md) for the module-to-concept guide and
-[the requirements document](PyChain%20Project%20Requirements%20Document.md)
-for the full API and protocol requirements.
+See [docs/CONCEPTS.md](docs/CONCEPTS.md) for the module-to-concept guide.
 
 ## Wallet CLI
 
