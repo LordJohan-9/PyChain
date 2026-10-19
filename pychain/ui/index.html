@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101713">
+    <title>PyChain · Node Explorer</title>
+    <link rel="stylesheet" href="/ui/styles.css">
+    <script src="/ui/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#dashboard" aria-label="PyChain dashboard">
+          <span class="brand-mark">P</span>
+          <span>pychain<small>NODE EXPLORER</small></span>
+        </a>
+        <p class="nav-label">WORKSPACE</p>
+        <nav aria-label="Main navigation">
+          <button class="nav-link active" data-view="dashboard"><span>◫</span>Dashboard</button>
+          <button class="nav-link" data-view="blocks"><span>▤</span>Blocks</button>
+          <button class="nav-link" data-view="wallet"><span>◉</span>Wallet &amp; Send</button>
+          <button class="nav-link" data-view="pending"><span>⇄</span>Pending</button>
+          <button class="nav-link" data-view="peers"><span>⌘</span>Peers</button>
+          <button class="nav-link" data-view="mining"><span>⛏</span>Mining &amp; Validation</button>
+        </nav>
+        <div class="sidebar-foot">
+          <span class="status-dot" id="sidebar-dot"></span>
+          <span id="sidebar-status">Connecting to node</span>
+          <small id="node-id-short">—</small>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>NETWORK</span><b>/</b><strong id="page-title">Dashboard</strong></div>
+          <div class="node-picker">
+            <label for="node-url">NODE</label>
+            <input id="node-url" type="url" aria-label="Node URL">
+            <button class="button button-muted" id="connect-node">Connect</button>
+          </div>
+        </header>
+
+        <div id="global-error" class="notice notice-error" role="alert" hidden></div>
+        <section class="view active" id="view-dashboard">
+          <div class="page-heading">
+            <div><p class="eyebrow">NETWORK OVERVIEW</p><h1>Dashboard</h1><p class="muted">A live view of this node and its ledger.</p></div>
+            <span class="live-pill"><i></i> LIVE · refreshes every 3 seconds</span>
+          </div>
+          <div class="metric-grid">
+            <article class="metric-card"><span>CHAIN HEIGHT</span><strong id="metric-height">—</strong><small>blocks confirmed</small></article>
+            <article class="metric-card"><span>CONNECTED PEERS</span><strong id="metric-peers">—</strong><small>known nodes</small></article>
+            <article class="metric-card"><span>PENDING TXS</span><strong id="metric-pending">—</strong><small>in mempool</small></article>
+            <article class="metric-card"><span>HASH RATE</span><strong id="metric-hashrate">—</strong><small>estimated hashes / sec</small></article>
+          </div>
+          <div class="content-grid">
+            <article class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">CHAIN TIP</p><h2>Latest block</h2></div><button class="text-button" data-go="blocks">View all blocks →</button></div>
+              <div id="latest-block" class="latest-block empty-state">Waiting for node data…</div>
+            </article>
+            <article class="panel node-panel">
+              <div class="panel-heading"><div><p class="eyebrow">NODE STATUS</p><h2 id="node-status-heading">Connecting</h2></div><span class="status-dot" id="status-dot"></span></div>
+              <dl class="detail-list">
+                <div><dt>Node URL</dt><dd id="status-url">—</dd></div>
+                <div><dt>Difficulty</dt><dd id="status-difficulty">—</dd></div>
+                <div><dt>Total work</dt><dd id="status-work">—</dd></div>
+                <div><dt>Tip hash</dt><dd class="mono truncate" id="status-tip">—</dd></div>
+              </dl>
+              <div class="node-actions"><button class="button button-primary" data-go="mining">Open mining controls</button><button class="button button-muted" data-action="validate">Validate chain</button></div>
+              <div id="validation-result" class="inline-result" role="status" hidden></div>
+            </article>
+          </div>
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>Latest blocks</h2></div><button class="text-button" data-go="blocks">Explore chain →</button></div>
+            <div class="table-wrap"><table><thead><tr><th>HEIGHT</th><th>HASH</th><th>TRANSACTIONS</th><th>DIFFICULTY</th><th>TIME</th></tr></thead><tbody id="recent-blocks"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-blocks">
+          <div class="page-heading"><div><p class="eyebrow">LEDGER</p><h1>Blocks</h1><p class="muted">Browse the chain from newest to genesis.</p></div><span class="count-pill" id="blocks-count">— blocks</span></div>
+          <div class="content-grid blocks-layout">
+            <article class="panel table-panel">
+              <div class="panel-heading"><div><p class="eyebrow">BLOCKCHAIN</p><h2>Block height</h2></div></div>
+              <div class="table-wrap"><table><thead><tr><th>HEIGHT</th><th>HASH</th><th>TXS</th><th>DIFFICULTY</th></tr></thead><tbody id="blocks-table"></tbody></table></div>
+              <div id="blocks-empty" class="empty-state" hidden>No blocks are available yet.</div>
+            </article>
+            <article class="panel block-detail-panel">
+              <div class="panel-heading"><div><p class="eyebrow">EXPLORER</p><h2 id="block-detail-title">Select a block</h2></div></div>
+              <div id="block-detail" class="empty-state">Choose a block to inspect its header and transactions.</div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-wallet">
+          <div class="page-heading"><div><p class="eyebrow">ACCOUNT</p><h1>Wallet &amp; Send</h1><p class="muted">Use this node’s wallet to send a signed transaction.</p></div></div>
+          <div class="content-grid wallet-layout">
+            <article class="panel wallet-card"><p class="eyebrow">NODE WALLET</p><h2 id="wallet-balance">— <small>PY</small></h2><p class="muted">Available balance</p><div class="address-row"><span id="wallet-address" class="mono break-all">Loading wallet…</span><button class="copy-button" data-copy="wallet-address" aria-label="Copy wallet address">Copy</button></div></article>
+            <article class="panel"><div class="panel-heading"><div><p class="eyebrow">TRANSFER</p><h2>Send coins</h2></div></div>
+              <form id="send-form" class="form-stack">
+                <label for="recipient">Recipient address</label><input id="recipient" name="recipient" required minlength="40" maxlength="40" pattern="[0-9a-f]{40}" placeholder="40-character address">
+                <label for="amount">Amount <span class="muted">(whole coins)</span></label><input id="amount" name="amount" type="number" required min="1" step="1" placeholder="10">
+                <button class="button button-primary" type="submit">Sign &amp; send</button>
+                <div id="send-result" class="inline-result" role="status" hidden></div>
+              </form>
+            </article>
+          </div>
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><p class="eyebrow">WALLET ACTIVITY</p><h2>Recent transactions</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>TX ID</th><th>TYPE</th><th>AMOUNT</th><th>BLOCK</th></tr></thead><tbody id="wallet-history"></tbody></table></div>
+            <div id="history-empty" class="empty-state" hidden>No wallet transactions found on this chain.</div>
+          </article>
+        </section>
+
+        <section class="view" id="view-pending">
+          <div class="page-heading"><div><p class="eyebrow">TRANSACTION QUEUE</p><h1>Pending</h1><p class="muted">Transactions waiting to be included in a block.</p></div><span class="count-pill" id="pending-count">0 pending</span></div>
+          <article class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>TX ID</th><th>FROM</th><th>TO</th><th>AMOUNT</th><th>NONCE</th></tr></thead><tbody id="pending-table"></tbody></table></div><div id="pending-empty" class="empty-state" hidden><span class="empty-icon">⇄</span><strong>Mempool is empty</strong><span>New transactions will appear here before they are mined.</span></div></article>
+        </section>
+
+        <section class="view" id="view-peers">
+          <div class="page-heading"><div><p class="eyebrow">P2P NETWORK</p><h1>Peers</h1><p class="muted">Manage connections and synchronize chain state.</p></div><button class="button button-muted" data-action="sync">↻ Sync now</button></div>
+          <article class="panel">
+            <form id="peer-form" class="peer-form"><div><label for="peer-url">Connect to a peer</label><p class="muted">Enter a node URL, for example http://localhost:8001</p></div><input id="peer-url" type="url" required placeholder="http://localhost:8001"><button class="button button-primary" type="submit">Add peer</button></form>
+          </article>
+          <article class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">CONNECTED NODES</p><h2 id="peer-heading">Peers</h2></div></div><div class="table-wrap"><table><thead><tr><th>NODE</th><th>URL</th><th>HEIGHT</th><th>HEALTH</th><th></th></tr></thead><tbody id="peers-table"></tbody></table></div><div id="peers-empty" class="empty-state" hidden><span class="empty-icon">⌘</span><strong>No peers connected</strong><span>Add a node URL to join the network.</span></div><div id="sync-result" class="inline-result" role="status" hidden></div></article>
+        </section>
+
+        <section class="view" id="view-mining">
+          <div class="page-heading"><div><p class="eyebrow">PROOF OF WORK</p><h1>Mining &amp; Validation</h1><p class="muted">Mine blocks and inspect the chain’s integrity.</p></div></div>
+          <div class="content-grid">
+            <article class="panel"><div class="panel-heading"><div><p class="eyebrow">MINER</p><h2>Mining controls</h2></div><span class="state-pill" id="mining-state">IDLE</span></div><p class="muted">A successful block credits this node wallet with the block reward.</p><div class="mining-progress"><div><span>Current nonce</span><strong class="mono" id="mining-nonce">—</strong></div><div><span>Attempts</span><strong class="mono" id="mining-attempts">—</strong></div><div><span>Hash rate</span><strong id="mining-rate">—</strong></div></div><div class="node-actions"><button class="button button-primary" data-action="mine">Mine one block</button><button class="button button-muted" id="auto-mine" data-action="auto-start">Start auto-mining</button></div><div id="mining-result" class="inline-result" role="status" hidden></div></article>
+            <article class="panel"><div class="panel-heading"><div><p class="eyebrow">INTEGRITY CHECK</p><h2>Validate chain</h2></div><span class="validation-icon">✓</span></div><p class="muted">Re-check block hashes, proof of work, transactions and chain history.</p><button class="button button-primary" data-action="validate">Validate entire chain</button><div id="mining-validation" class="inline-result" role="status" hidden></div></article>
+          </div>
+        </section>
+
+        <footer><span>PYCHAIN NETWORK</span><span>Local node · data stays on this machine</span></footer>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
