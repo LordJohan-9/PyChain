@@ -35,6 +35,9 @@ def test_signed_transaction_verifies_and_json_round_trips() -> None:
     assert decoded.to_dict() == transaction.to_dict()
     assert decoded.verify()
     assert decoded.sender_address == wallet.address
+    assert decoded.version == 1
+    assert decoded.transaction_type == "transfer"
+    assert decoded.signature_scheme == "secp256k1"
 
 
 @pytest.mark.parametrize(
@@ -87,6 +90,30 @@ def test_expected_sender_address_must_match_public_key() -> None:
     assert not transaction.verify(expected_sender_address=Wallet.generate().address)
 
 
+def test_chain_id_is_committed_to_transaction_id_and_signature() -> None:
+    wallet = Wallet.generate()
+    recipient = Wallet.generate()
+    transaction = wallet.create_transaction(
+        recipient.address,
+        1,
+        nonce=0,
+        timestamp=1_700_000_000,
+        chain_id="testnet-a",
+    )
+    replay = wallet.create_transaction(
+        recipient.address,
+        1,
+        nonce=0,
+        timestamp=1_700_000_000,
+        chain_id="testnet-b",
+    )
+
+    assert transaction.verify(expected_chain_id="testnet-a")
+    assert not transaction.verify(expected_chain_id="testnet-b")
+    assert transaction.tx_id != replay.tx_id
+    assert transaction.to_dict()["chain_id"] == "testnet-a"
+
+
 def test_transaction_rejects_invalid_amount_and_recipient_when_signing() -> None:
     wallet = Wallet.generate()
     invalid = Transaction(
@@ -130,6 +157,7 @@ def test_json_parser_rejects_missing_fields_and_wrong_types() -> None:
     ).to_dict()
     invalid_payloads = [
         {key: value for key, value in valid_payload.items() if key != "signature"},
+        {key: value for key, value in valid_payload.items() if key != "version"},
         {**valid_payload, "amount": True},
         {**valid_payload, "tx_id": ""},
         {**valid_payload, "unexpected": "field"},

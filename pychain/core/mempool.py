@@ -46,9 +46,7 @@ class Mempool:
         for transaction in self._transactions.values():
             sender = transaction.sender_address
             expected_nonces[sender] = expected_nonces.get(sender, 0) + 1
-            remaining_balances[sender] = (
-                remaining_balances.get(sender, 0) - transaction.amount
-            )
+            remaining_balances[sender] = remaining_balances.get(sender, 0) - transaction.amount
         return expected_nonces, remaining_balances
 
     def add(self, transaction: Transaction) -> bool:
@@ -57,7 +55,7 @@ class Mempool:
             raise MempoolError("transaction must be a Transaction")
         if transaction.is_coinbase:
             raise MempoolError("coinbase transactions cannot enter the mempool")
-        if not transaction.verify():
+        if not transaction.verify(expected_chain_id=self._blockchain.tip.chain_id):
             raise MempoolError("transaction has invalid fields, ID, sender, or signature")
         if transaction.tx_id in self._confirmed_tx_ids():
             raise MempoolError("transaction is already confirmed")

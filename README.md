@@ -109,7 +109,15 @@ node layer coordinates persistence, mining, API calls, peer messaging, and
 fork resolution. Peer messages are bounded and rate-limited by the node's
 in-process P2P middleware.
 
-See [docs/CONCEPTS.md](docs/CONCEPTS.md) for the module-to-concept guide.
+Consensus engines and signature schemes are exposed through interfaces, with
+proof-of-work and secp256k1 as the current implementations. Serialized blocks,
+transactions, peer messages, and stored JSON files are versioned. See
+[`docs/CONCEPTS.md`](docs/CONCEPTS.md) and
+[`tests/vectors/canonical_vectors.json`](tests/vectors/canonical_vectors.json)
+for protocol details and reproducible canonical examples.
+
+See [docs/CONCEPTS.md](docs/CONCEPTS.md)
+for the full API and protocol requirements.
 
 ## Wallet CLI
 

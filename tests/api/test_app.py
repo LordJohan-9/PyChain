@@ -46,10 +46,13 @@ def test_peer_can_be_removed_through_api(tmp_path) -> None:
 
         assert removed.status_code == 204
         assert client.get("/peers").json() == {"peers": []}
-        assert client.delete(
-            "/peers",
-            params={"url": "http://127.0.0.1:8001"},
-        ).status_code == 404
+        assert (
+            client.delete(
+                "/peers",
+                params={"url": "http://127.0.0.1:8001"},
+            ).status_code
+            == 404
+        )
         assert client.delete("/peers", params={"url": "not-a-url"}).status_code == 400
 
 
@@ -72,10 +75,15 @@ def test_p2p_body_size_limit_rejects_large_request(tmp_path) -> None:
 def test_p2p_rate_limit_is_per_client_and_returns_retry_after(tmp_path) -> None:
     with TestClient(create_app(tmp_path, p2p_requests_per_window=1)) as client:
         payload = {
-            "node_id": "remote-node",
-            "url": "http://127.0.0.1:8001",
-            "height": 0,
-            "total_work": 0,
+            "version": 1,
+            "message_type": "hello",
+            "sender_id": "remote-node",
+            "payload": {
+                "node_id": "remote-node",
+                "url": "http://127.0.0.1:8001",
+                "height": 0,
+                "total_work": 0,
+            },
         }
         first = client.post("/p2p/hello", json=payload)
         limited = client.post("/p2p/hello", json=payload)

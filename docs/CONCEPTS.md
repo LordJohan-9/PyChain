@@ -9,9 +9,11 @@ implements. Source paths are relative to the repository root.
 | --- | --- |
 | `pychain/config.py` | Shared consensus and capacity parameters. Keeping them together makes protocol changes visible and consistent across nodes. |
 | `pychain/core/hashing.py` | Canonical JSON serialization and SHA-256. Deterministic serialization ensures nodes compute the same identifiers and hashes from the same data. |
-| `pychain/core/block.py` | Block header and body, header hashing, and the fixed genesis block. A block commits to its parent and transaction Merkle root. |
+| `pychain/core/signatures.py` | Signature-scheme contract and registry; secp256k1 is the default scheme. |
+| `pychain/core/consensus.py` | Consensus-engine contract for proposing, validating, finalizing, scoring, and difficulty selection; proof-of-work is the default engine. |
+| `pychain/core/block.py` | Versioned block header and body, header hashing, and the fixed chain-ID genesis block. A block commits to its parent and transaction Merkle root. |
 | `pychain/core/pow.py` | Proof-of-work target checks, nonce search, cancellation/progress reporting, and difficulty retargeting. |
-| `pychain/core/transaction.py` | Signed account transfers and unsigned coinbase rewards. Transaction IDs commit to transfer fields; signatures authorize the sender. |
+| `pychain/core/transaction.py` | Versioned, typed, chain-ID-bound transfers and unsigned coinbase rewards. Transaction IDs commit to transfer fields; pluggable signatures authorize the sender. |
 | `pychain/core/wallet.py` | secp256k1 key generation, address derivation, signing support, and JSON wallet persistence. |
 | `pychain/core/chain.py` | Chain state, balances and nonces, block acceptance, historical validation, cumulative work, and chain replacement. |
 | `pychain/core/mempool.py` | Pending transaction validation, deduplication, nonce/balance checks, and recovery of transactions after a reorganization. |
@@ -20,6 +22,7 @@ implements. Source paths are relative to the repository root.
 | `pychain/node/hardening.py` | P2P request-body bounds and a per-client fixed-window request limiter. |
 | `pychain/node/miner.py` | Node runtime state, atomic coordination with mining, auto-mining lifecycle, persistence, and received block/transaction handling. |
 | `pychain/node/peers.py` | Peer records, handshakes/discovery, health checks, gossip deduplication, peer penalties, and network synchronization entry points. |
+| `pychain/node/p2p.py` | Canonical versioned P2P message envelope with no dependency on HTTP or FastAPI. |
 | `pychain/node/consensus.py` | Full-chain retrieval, validation, cumulative-work fork choice, chain adoption, and mempool repair on reorganization. |
 | `pychain/node/storage.py` | Atomic JSON persistence and full chain validation when loading stored state. |
 | `pychain/node/__main__.py` | `python -m pychain.node` command-line node launcher. |
@@ -98,3 +101,25 @@ values are source-level protocol parameters.
   authentication or network isolation.
 - Wallet JSON contains a private key without encryption. Protect wallet files
   with operating-system permissions and do not share them.
+
+  ## Canonical protocol and versioning
+
+  Canonical JSON uses UTF-8, sorted object keys, no insignificant whitespace,
+  and no non-finite numbers. Block headers and unsigned transaction fields are
+  hashed from that representation. `CHAIN_ID` is committed to the genesis block
+  and every transaction ID/signature, preventing a signed transfer from being
+  replayed across different chain IDs. Block and transaction payloads include
+  their serialization version; transaction payloads also identify their type
+  and signature scheme.
+
+  Chain, peer-list, and wallet files are versioned JSON objects. Their stored
+  formats intentionally reject missing or unsupported versions rather than
+  silently interpreting old data. P2P messages use the transport-neutral
+  `P2PMessage` envelope (`version`, `message_type`, `sender_id`, `payload`);
+  HTTP contributes the peer URL only as transport metadata. A future socket or
+  binary transport can encode the same canonical envelope independently.
+
+  `tests/vectors/canonical_vectors.json` is the cross-implementation
+  specification. Implementations should reproduce its genesis and sample block,
+  transfer and coinbase transaction, canonical serialization, transaction IDs,
+  and hashes exactly.

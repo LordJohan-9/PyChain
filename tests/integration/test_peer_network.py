@@ -129,9 +129,17 @@ def test_handshake_discovery_and_transaction_gossip_without_loops(tmp_path) -> N
                     duplicate = client.post(
                         f"{node_b}/p2p/transactions",
                         json={
-                            "transaction": {
+                            "version": 1,
+                            "message_type": "transaction",
+                            "sender_id": client.get(f"{node_a}/status").json()["node_id"],
+                            "sender_url": node_a,
+                            "payload": {
                                 key: transaction[key]
                                 for key in (
+                                    "version",
+                                    "chain_id",
+                                    "type",
+                                    "signature_scheme",
                                     "sender_public_key",
                                     "recipient",
                                     "amount",
@@ -141,11 +149,10 @@ def test_handshake_discovery_and_transaction_gossip_without_loops(tmp_path) -> N
                                     "tx_id",
                                 )
                             },
-                            "sender_url": node_a,
                         },
                     )
                     assert duplicate.status_code == 200
-                    assert duplicate.json() == {"accepted": False}
+                    assert duplicate.json() == {"version": 1, "accepted": False}
                     counts = [
                         sum(
                             item["tx_id"] == tx_id
@@ -159,16 +166,22 @@ def test_handshake_discovery_and_transaction_gossip_without_loops(tmp_path) -> N
                         response = client.post(
                             f"{node_b}/p2p/blocks",
                             json={
+                                "version": 1,
+                                "message_type": "block",
+                                "sender_id": client.get(f"{node_a}/status").json()["node_id"],
                                 "sender_url": node_a,
-                                "block": {"malformed_attempt": strike},
+                                "payload": {"malformed_attempt": strike},
                             },
                         )
                         assert response.status_code == 400
                     banned_response = client.post(
                         f"{node_b}/p2p/blocks",
                         json={
+                            "version": 1,
+                            "message_type": "block",
+                            "sender_id": client.get(f"{node_a}/status").json()["node_id"],
                             "sender_url": node_a,
-                            "block": {"malformed_attempt": "after-ban"},
+                            "payload": {"malformed_attempt": "after-ban"},
                         },
                     )
                     assert banned_response.status_code == 403

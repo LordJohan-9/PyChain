@@ -20,6 +20,23 @@ from pychain.core.wallet import Wallet
 TEST_NOW = GENESIS_BLOCK.timestamp
 
 
+class TestConsensus:
+    def propose(self, candidate, cancel_event, *, timestamp_fn, progress_fn=None):
+        return candidate
+
+    def validate(self, block):
+        return True
+
+    def finalize(self, block):
+        return block
+
+    def score(self, chain):
+        return len(chain)
+
+    def expected_difficulty(self, previous_difficulty, elapsed, *, interval, target_block_time):
+        return previous_difficulty
+
+
 def make_chain() -> Blockchain:
     return Blockchain(clock=lambda: TEST_NOW)
 
@@ -181,9 +198,7 @@ def test_tampering_with_historical_block_is_reported_at_that_height() -> None:
     chain = make_chain()
     miner = Wallet.generate()
     for offset in (1, 2):
-        chain.append_block(
-            chain.mine_candidate_block(miner.address, timestamp=TEST_NOW + offset)
-        )
+        chain.append_block(chain.mine_candidate_block(miner.address, timestamp=TEST_NOW + offset))
     altered_chain = deepcopy(chain.chain)
     altered_chain[1].nonce += 1
 
@@ -350,6 +365,30 @@ def test_block_rejects_overspending_and_double_spending() -> None:
     assert error.rule == "nonce"
 
 
+def test_chain_rejects_transaction_signed_for_another_chain_id() -> None:
+    chain = make_chain()
+    sender = Wallet.generate()
+    recipient = Wallet.generate()
+    chain.append_block(chain.mine_candidate_block(sender.address, timestamp=TEST_NOW + 1))
+    replay = sender.create_transaction(
+        recipient.address,
+        1,
+        nonce=0,
+        timestamp=TEST_NOW + 2,
+        chain_id="another-network",
+    )
+    block = chain.mine_candidate_block(
+        Wallet.generate().address,
+        [replay],
+        timestamp=TEST_NOW + 2,
+    )
+
+    error = chain.validate_chain([*chain.chain, block])
+
+    assert error is not None
+    assert error.rule == "transaction_chain_id"
+
+
 def test_block_rejects_replayed_nonce_and_already_confirmed_transaction() -> None:
     chain = make_chain()
     sender = Wallet.generate()
@@ -419,3 +458,14 @@ def test_fork_choice_uses_cumulative_work_and_keeps_current_on_ties() -> None:
     assert not compare_chains(current, equal_weight)
     assert compare_chains(current, heavier)
     assert chain_weight(heavier) > chain_weight(current)
+
+
+def test_consensus_engine_can_be_swapped_without_changing_ledger() -> None:
+    chain = Blockchain(clock=lambda: TEST_NOW, consensus=TestConsensus())
+    block = chain.mine_candidate_block(Wallet.generate().address, timestamp=TEST_NOW + 1)
+
+    chain.append_block(block)
+
+    assert chain.height == 1
+    assert chain.total_work == 2
+    assert chain.validate_chain() is None

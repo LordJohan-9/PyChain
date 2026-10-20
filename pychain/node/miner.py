@@ -10,8 +10,8 @@ from pathlib import Path
 from pychain.config import MAX_TX_PER_BLOCK
 from pychain.core.block import Block
 from pychain.core.chain import Blockchain, BlockValidationError, ValidationError
+from pychain.core.consensus import DEFAULT_CONSENSUS, ConsensusEngine
 from pychain.core.mempool import Mempool
-from pychain.core.pow import mine_block
 from pychain.core.transaction import Transaction
 from pychain.core.wallet import Wallet
 from pychain.node.peers import PeerManager
@@ -38,6 +38,7 @@ class NodeRuntime:
         *,
         port: int = 8000,
         clock: Clock = time.time,
+        consensus: ConsensusEngine = DEFAULT_CONSENSUS,
     ) -> None:
         self.clock = clock
         self.port = port
@@ -45,9 +46,9 @@ class NodeRuntime:
         self.node_id = str(uuid.uuid4())
         self.storage = JsonStorage(data_dir)
         if self.storage.chain_path.exists():
-            self.blockchain = self.storage.load_chain(clock=clock)
+            self.blockchain = self.storage.load_chain(clock=clock, consensus=consensus)
         else:
-            self.blockchain = Blockchain(clock=clock)
+            self.blockchain = Blockchain(clock=clock, consensus=consensus)
             self.storage.save_chain(self.blockchain)
         wallet_path = self.storage.data_dir / "wallet.json"
         if wallet_path.exists():
@@ -124,7 +125,7 @@ class NodeRuntime:
                 self._mining_nonce = nonce
                 self._mining_attempts = attempts
 
-            result = mine_block(
+            result = self.blockchain.consensus.propose(
                 candidate,
                 self._stop_event,
                 timestamp_fn=self.clock,

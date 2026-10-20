@@ -4,18 +4,11 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ecdsa import (  # type: ignore[import-untyped]
-    MalformedPointError,
-    SECP256k1,
-    SigningKey,
-    VerifyingKey,
-)
-
-from pychain.core.hashing import sha256_hex
+from pychain.config import CHAIN_ID, SECP256K1_SCHEME, SERIALIZATION_VERSION
+from pychain.core.signatures import get_signature_scheme
 
 if TYPE_CHECKING:
     from pychain.core.transaction import Transaction
@@ -32,15 +25,9 @@ class WalletError(ValueError):
 def address_from_public_key(public_key_hex: str) -> str:
     """Derive an address from the UTF-8 representation of a secp256k1 public key."""
     try:
-        if not isinstance(public_key_hex, str):
-            raise ValueError("public key must be text")
-        public_key_bytes = bytes.fromhex(public_key_hex)
-        if len(public_key_hex) != PUBLIC_KEY_LENGTH:
-            raise ValueError("unexpected public key length")
-        VerifyingKey.from_string(public_key_bytes, curve=SECP256k1, hashfunc=sha256)
-    except (ValueError, TypeError, MalformedPointError) as error:
+        return get_signature_scheme(SECP256K1_SCHEME).derive_address(public_key_hex)
+    except (ValueError, TypeError) as error:
         raise WalletError("public_key must be a valid secp256k1 public key in hex") from error
-    return sha256_hex(public_key_hex)[:ADDRESS_LENGTH]
 
 
 def is_valid_address(address: str) -> bool:
@@ -54,42 +41,43 @@ def is_valid_address(address: str) -> bool:
 
 @dataclass(frozen=True)
 class Wallet:
-    """A secp256k1 key pair stored as hexadecimal strings for the local demo."""
+    """A versioned signing-scheme key pair for the local demo."""
 
     private_key: str
     public_key: str
     address: str
+    signature_scheme: str = SECP256K1_SCHEME
 
     def __post_init__(self) -> None:
         try:
-            private_key_bytes = bytes.fromhex(self.private_key)
-            if len(self.private_key) != PRIVATE_KEY_LENGTH:
-                raise ValueError("unexpected private key length")
-            signing_key = SigningKey.from_string(
-                private_key_bytes,
-                curve=SECP256k1,
-                hashfunc=sha256,
-            )
-            derived_public_key = signing_key.verifying_key.to_string().hex()
-        except (ValueError, TypeError, MalformedPointError) as error:
-            raise WalletError("private_key must be a valid secp256k1 private key in hex") from error
+            scheme = get_signature_scheme(self.signature_scheme)
+            derived_public_key = scheme.public_key_from_private(self.private_key)
+            derived_address = scheme.derive_address(self.public_key)
+        except (ValueError, TypeError) as error:
+            raise WalletError(f"invalid {self.signature_scheme} wallet key data") from error
 
         if self.public_key != derived_public_key:
             raise WalletError("public_key does not match private_key")
-        if self.address != address_from_public_key(self.public_key):
+        if self.address != derived_address:
             raise WalletError("address does not match public_key")
 
     @classmethod
-    def generate(cls) -> "Wallet":
-        """Generate a new secp256k1 wallet."""
-        signing_key = SigningKey.generate(curve=SECP256k1, hashfunc=sha256)
-        private_key = signing_key.to_string().hex()
-        public_key = signing_key.verifying_key.to_string().hex()
-        return cls(private_key, public_key, address_from_public_key(public_key))
+    def generate(cls, signature_scheme: str = SECP256K1_SCHEME) -> "Wallet":
+        """Generate a key pair using the requested registered signature scheme."""
+        scheme = get_signature_scheme(signature_scheme)
+        private_key, public_key = scheme.generate_keypair()
+        return cls(
+            private_key,
+            public_key,
+            scheme.derive_address(public_key),
+            signature_scheme=signature_scheme,
+        )
 
-    def to_dict(self) -> dict[str, str]:
-        """Return the wallet fields persisted in the demo's plain JSON file."""
+    def to_dict(self) -> dict[str, str | int]:
+        """Return the versioned wallet fields persisted in the demo's JSON file."""
         return {
+            "version": SERIALIZATION_VERSION,
+            "signature_scheme": self.signature_scheme,
             "private_key": self.private_key,
             "public_key": self.public_key,
             "address": self.address,
@@ -126,17 +114,28 @@ class Wallet:
         except (OSError, json.JSONDecodeError) as error:
             raise WalletError(f"could not read wallet file {wallet_path}: {error}") from error
         if not isinstance(payload, dict) or set(payload) != {
+            "version",
+            "signature_scheme",
             "private_key",
             "public_key",
             "address",
         }:
-            raise WalletError("wallet file must contain private_key, public_key, and address")
-        if not all(isinstance(payload[key], str) for key in payload):
-            raise WalletError("wallet fields must be strings")
+            raise WalletError(
+                "wallet file must contain version, signature_scheme, private_key, public_key, "
+                "and address"
+            )
+        if type(payload["version"]) is not int or payload["version"] != SERIALIZATION_VERSION:
+            raise WalletError(f"unsupported wallet version {payload['version']!r}")
+        if not all(
+            isinstance(payload[key], str)
+            for key in ("signature_scheme", "private_key", "public_key", "address")
+        ):
+            raise WalletError("wallet string fields must be strings")
         return cls(
             private_key=payload["private_key"],
             public_key=payload["public_key"],
             address=payload["address"],
+            signature_scheme=payload["signature_scheme"],
         )
 
     def create_transaction(
@@ -145,6 +144,7 @@ class Wallet:
         amount: int,
         nonce: int,
         timestamp: int | None = None,
+        chain_id: str | None = None,
     ) -> "Transaction":
         """Create and sign a transfer from this wallet."""
         from pychain.core.transaction import Transaction
@@ -155,4 +155,5 @@ class Wallet:
             amount=amount,
             nonce=nonce,
             timestamp=timestamp,
+            chain_id=CHAIN_ID if chain_id is None else chain_id,
         )

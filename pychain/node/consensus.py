@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from pychain.config import SERIALIZATION_VERSION
 from pychain.core.chain import Blockchain, BlockValidationError
 from pychain.core.transaction import Transaction
 from pychain.node.storage import JsonStorage, PersistenceError
@@ -56,16 +57,24 @@ class ConsensusManager:
             except ValueError as error:
                 self.peers.strike(normalized_url)
                 raise ValueError("peer chain response is not valid JSON") from error
-        if not isinstance(payload, dict) or not isinstance(payload.get("blocks"), list):
+        if (
+            not isinstance(payload, dict)
+            or type(payload.get("version")) is not int
+            or payload.get("version") != SERIALIZATION_VERSION
+            or not isinstance(payload.get("blocks"), list)
+        ):
             self.peers.strike(normalized_url)
-            raise ValueError("peer chain response must contain a blocks array")
+            raise ValueError("peer chain response has an unsupported version or blocks array")
 
         try:
             blocks = [
-                JsonStorage._block_from_dict(block_payload)
-                for block_payload in payload["blocks"]
+                JsonStorage._block_from_dict(block_payload) for block_payload in payload["blocks"]
             ]
-            candidate = Blockchain(blocks, clock=self.runtime.clock)
+            candidate = Blockchain(
+                blocks,
+                clock=self.runtime.clock,
+                consensus=self.runtime.blockchain.consensus,
+            )
         except (BlockValidationError, TypeError, ValueError) as error:
             self.peers.strike(normalized_url)
             raise ValueError(f"peer supplied an invalid chain: {error}") from error
@@ -122,10 +131,7 @@ class ConsensusManager:
                 return False
             if block.index <= chain.height:
                 return False
-            extends_tip = (
-                block.index == chain.height + 1
-                and block.previous_hash == chain.tip.hash
-            )
+            extends_tip = block.index == chain.height + 1 and block.previous_hash == chain.tip.hash
 
         if extends_tip:
             return self.runtime.receive_extending_block(block, sender_url)

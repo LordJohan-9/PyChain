@@ -2,12 +2,12 @@
 
 from dataclasses import dataclass, field
 
-from pychain.config import INITIAL_DIFFICULTY_BITS
+from pychain.config import CHAIN_ID, INITIAL_DIFFICULTY_BITS, SERIALIZATION_VERSION
 from pychain.core.hashing import canonical_json, merkle_root, sha256_hex
 
 GENESIS_TIMESTAMP = 1_700_000_000
-GENESIS_NONCE = 186_063
-GENESIS_HASH = "00004137331b73d5343f99eeff4a2668c6950adfa9130530a5d77303d1bfa84d"
+GENESIS_NONCE = 84_992
+GENESIS_HASH = "0000016894cfec6303be1a40892c88b7556cd3faf73e2691b29a24d634b2b2cf"
 
 
 @dataclass
@@ -22,6 +22,8 @@ class Block:
     nonce: int = 0
     transactions: list[dict[str, object]] = field(default_factory=list)
     hash: str = ""
+    version: int = SERIALIZATION_VERSION
+    chain_id: str = CHAIN_ID
 
     def __post_init__(self) -> None:
         if not self.hash:
@@ -30,6 +32,8 @@ class Block:
     def header_dict(self) -> dict[str, int | str]:
         """Return exactly the fields committed by the block hash."""
         return {
+            "version": self.version,
+            "chain_id": self.chain_id,
             "index": self.index,
             "timestamp": self.timestamp,
             "previous_hash": self.previous_hash,
@@ -63,4 +67,6 @@ GENESIS_BLOCK = Block(
     difficulty_bits=INITIAL_DIFFICULTY_BITS,
     nonce=GENESIS_NONCE,
     hash=GENESIS_HASH,
+    version=SERIALIZATION_VERSION,
+    chain_id=CHAIN_ID,
 )

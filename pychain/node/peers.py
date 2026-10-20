@@ -4,14 +4,16 @@ import logging
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
 
-from pychain.config import MAX_PEERS
+from pychain.config import MAX_PEERS, SERIALIZATION_VERSION
 from pychain.node.consensus import SYNC_INTERVAL_SECONDS, ConsensusManager
+from pychain.node.p2p import P2PMessage
 
 if TYPE_CHECKING:
     from pychain.node.miner import NodeRuntime
@@ -21,6 +23,8 @@ PEER_TIMEOUT_SECONDS = 3.0
 MAX_SEEN_IDS = 10_000
 MAX_PEER_STRIKES = 5
 MAX_PEER_FAILURES = 3
+
+
 @dataclass
 class Peer:
     """Tracked peer connection and session health state."""
@@ -32,9 +36,11 @@ class Peer:
     last_seen: float
     failures: int = 0
     strikes: int = 0
+    version: int = SERIALIZATION_VERSION
 
     def to_dict(self) -> dict[str, str | int | float]:
         return {
+            "version": self.version,
             "node_id": self.node_id,
             "url": self.url,
             "height": self.height,
@@ -121,19 +127,23 @@ class PeerManager:
             if len(self._peers) >= MAX_PEERS:
                 raise ValueError(f"peer limit of {MAX_PEERS} has been reached")
 
-        payload = {
-            "node_id": self.runtime.node_id,
-            "url": self.runtime.url,
-            "height": self.runtime.blockchain.height,
-            "total_work": self.runtime.blockchain.total_work,
-        }
+        payload = P2PMessage(
+            "hello",
+            self.runtime.node_id,
+            {
+                "node_id": self.runtime.node_id,
+                "url": self.runtime.url,
+                "height": self.runtime.blockchain.height,
+                "total_work": self.runtime.blockchain.total_work,
+            },
+        ).to_dict()
         with httpx.Client(timeout=PEER_TIMEOUT_SECONDS) as client:
             response = client.post(f"{normalized_url}/p2p/hello", json=payload)
             response.raise_for_status()
             remote = response.json()
         peer = self._record_peer(remote)
         self._save_peers()
-        discovered = remote.get("peers", [])
+        discovered = P2PMessage.from_dict(remote).payload.get("peers", [])
         if isinstance(discovered, list):
             for item in discovered:
                 if not isinstance(item, dict):
@@ -172,22 +182,27 @@ class PeerManager:
     def _record_peer(self, response: object) -> Peer:
         if not isinstance(response, dict):
             raise ValueError("peer handshake response must be an object")
+        message = P2PMessage.from_dict(response)
+        if message.message_type != "hello":
+            raise ValueError("peer handshake response has an unsupported message type")
+        if message.payload.get("node_id") != message.sender_id:
+            raise ValueError("peer handshake sender ID does not match its payload")
         return self.record_hello(
-            node_id=self._required_string(response, "node_id"),
-            url=self._required_string(response, "url"),
-            height=self._required_int(response, "height"),
-            total_work=self._required_int(response, "total_work"),
+            node_id=message.sender_id,
+            url=self._required_string(message.payload, "url"),
+            height=self._required_int(message.payload, "height"),
+            total_work=self._required_int(message.payload, "total_work"),
         )
 
     @staticmethod
-    def _required_string(value: dict[object, object], key: str) -> str:
+    def _required_string(value: Mapping[str, Any], key: str) -> str:
         field = value.get(key)
         if not isinstance(field, str):
             raise ValueError(f"peer handshake field {key} must be a string")
         return field
 
     @staticmethod
-    def _required_int(value: dict[object, object], key: str) -> int:
+    def _required_int(value: Mapping[str, Any], key: str) -> int:
         field = value.get(key)
         if not isinstance(field, int) or isinstance(field, bool):
             raise ValueError(f"peer handshake field {key} must be an integer")
@@ -228,6 +243,12 @@ class PeerManager:
         normalized_url = self._normalize_url(url)
         with self._lock:
             return normalized_url in self._peers
+
+    def is_known_peer(self, url: str, node_id: str) -> bool:
+        normalized_url = self._normalize_url(url)
+        with self._lock:
+            peer = self._peers.get(normalized_url)
+            return peer is not None and peer.node_id == node_id
 
     def strike(self, url: str) -> int:
         normalized_url = self._normalize_url(url)
@@ -275,10 +296,8 @@ class PeerManager:
             return
         if not already_seen and not self.mark_seen(f"tx:{tx_id}"):
             return
-        payload: dict[str, object] = {
-            "transaction": transaction,
-            "sender_url": self.runtime.url,
-        }
+        payload = P2PMessage("transaction", self.runtime.node_id, transaction).to_dict()
+        payload["sender_url"] = self.runtime.url
         self._broadcast("/p2p/transactions", payload, exclude_url)
 
     def gossip_block(
@@ -293,7 +312,8 @@ class PeerManager:
             return
         if not already_seen and not self.mark_seen(f"block:{block_hash}"):
             return
-        payload: dict[str, object] = {"block": block, "sender_url": self.runtime.url}
+        payload = P2PMessage("block", self.runtime.node_id, block).to_dict()
+        payload["sender_url"] = self.runtime.url
         self._broadcast("/p2p/blocks", payload, exclude_url)
 
     def _broadcast(

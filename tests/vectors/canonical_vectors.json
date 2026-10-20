@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "specification": {
+    "encoding": "UTF-8",
+    "hash_algorithm": "SHA-256",
+    "json": "sorted keys, compact separators, no NaN or Infinity",
+    "serialization_version": 1
+  },
+  "coinbase": {
+    "amount": 50,
+    "chain_id": "pychain-local-v1",
+    "nonce": 0,
+    "recipient": "694a228d3e09720e1e8387fac6bb85e9a2d5841f",
+    "sender_public_key": "COINBASE",
+    "signature": "",
+    "signature_scheme": "secp256k1",
+    "timestamp": 1700000001,
+    "tx_id": "ce1cd78263987b81e14f98e23230e3423f8d931be2909af1f6b05418512fd983",
+    "type": "coinbase",
+    "version": 1
+  },
+  "genesis": {
+    "chain_id": "pychain-local-v1",
+    "difficulty_bits": 16,
+    "hash": "0000016894cfec6303be1a40892c88b7556cd3faf73e2691b29a24d634b2b2cf",
+    "index": 0,
+    "merkle_root": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "nonce": 84992,
+    "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "timestamp": 1700000000,
+    "transactions": [],
+    "version": 1
+  },
+  "hashes": {
+    "coinbase_tx_id": "ce1cd78263987b81e14f98e23230e3423f8d931be2909af1f6b05418512fd983",
+    "genesis_hash": "0000016894cfec6303be1a40892c88b7556cd3faf73e2691b29a24d634b2b2cf",
+    "sample_block_hash": "0000549be8d18c1520ffbb9a492e519485fb42cb47f83273cd810b7424286b36",
+    "transfer_canonical_sha256": "6514156a46b72cd0dd50175a8d129de6e7c202ac483d86c82661dcb8f7cdaeb6",
+    "transfer_tx_id": "6a8b76306f160ae10ac70fa3dfd1aea610a7655099519c49d440f9a1b3e7ca87"
+  },
+  "sample_block": {
+    "chain_id": "pychain-local-v1",
+    "difficulty_bits": 16,
+    "hash": "0000549be8d18c1520ffbb9a492e519485fb42cb47f83273cd810b7424286b36",
+    "index": 1,
+    "merkle_root": "ce1cd78263987b81e14f98e23230e3423f8d931be2909af1f6b05418512fd983",
+    "nonce": 61890,
+    "previous_hash": "0000016894cfec6303be1a40892c88b7556cd3faf73e2691b29a24d634b2b2cf",
+    "timestamp": 1700000001,
+    "transactions": [
+      {
+        "amount": 50,
+        "chain_id": "pychain-local-v1",
+        "nonce": 0,
+        "recipient": "694a228d3e09720e1e8387fac6bb85e9a2d5841f",
+        "sender_public_key": "COINBASE",
+        "signature": "",
+        "signature_scheme": "secp256k1",
+        "timestamp": 1700000001,
+        "tx_id": "ce1cd78263987b81e14f98e23230e3423f8d931be2909af1f6b05418512fd983",
+        "type": "coinbase",
+        "version": 1
+      }
+    ],
+    "version": 1
+  },
+  "transfer": {
+    "amount": 7,
+    "chain_id": "pychain-local-v1",
+    "nonce": 0,
+    "recipient": "694a228d3e09720e1e8387fac6bb85e9a2d5841f",
+    "sender_public_key": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+    "signature": "bcf67d2117819fa7bfa07c3b399b330d6d8bd6817d1b2a5cb833911a3f80bb846964a3df42ab5c5932131afcdaae77db6711707bb31726e0e08824ea9046b745",
+    "signature_scheme": "secp256k1",
+    "timestamp": 1700000001,
+    "tx_id": "6a8b76306f160ae10ac70fa3dfd1aea610a7655099519c49d440f9a1b3e7ca87",
+    "type": "transfer",
+    "version": 1
+  }
+}

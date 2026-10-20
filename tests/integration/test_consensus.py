@@ -60,9 +60,7 @@ def test_reorg_requeues_still_valid_orphaned_transaction(tmp_path) -> None:
             with httpx.Client(timeout=10) as client:
                 assert client.post(f"{fork_a}/peers", json={"url": fork_b}).status_code == 201
                 assert client.post(f"{fork_a}/mine").status_code == 201
-                assert wait_for(
-                    lambda: client.get(f"{fork_b}/status").json()["height"] == 1
-                )
+                assert wait_for(lambda: client.get(f"{fork_b}/status").json()["height"] == 1)
 
                 app_a.state.runtime.peer_manager.remove_peer(fork_b)
                 app_b.state.runtime.peer_manager.remove_peer(fork_a)
@@ -82,9 +80,7 @@ def test_reorg_requeues_still_valid_orphaned_transaction(tmp_path) -> None:
                 assert wait_for(
                     lambda: any(
                         transaction["tx_id"] == tx_id
-                        for transaction in client.get(
-                            f"{fork_a}/transactions/pending"
-                        ).json()
+                        for transaction in client.get(f"{fork_a}/transactions/pending").json()
                     )
                 )
                 assert client.get(f"{fork_a}/status").json()["height"] == 3
@@ -99,7 +95,7 @@ def test_startup_syncs_from_configured_peer(tmp_path) -> None:
         configured_dir = tmp_path / "configured"
         configured_dir.mkdir()
         (configured_dir / "peers.json").write_text(
-            json.dumps([source_url]),
+            json.dumps({"version": 1, "peers": [source_url]}),
             encoding="utf-8",
         )
         with running_node_with_app(tmp_path, "configured") as (configured_url, _):

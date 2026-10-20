@@ -9,14 +9,15 @@ from typing import TypeAlias
 
 from pychain.config import (
     BLOCK_REWARD,
+    CHAIN_ID,
     MAX_FUTURE_DRIFT,
     MAX_TX_PER_BLOCK,
     RETARGET_INTERVAL,
     TARGET_BLOCK_TIME,
 )
 from pychain.core.block import GENESIS_BLOCK, Block
+from pychain.core.consensus import DEFAULT_CONSENSUS, ConsensusEngine
 from pychain.core.hashing import merkle_root
-from pychain.core.pow import meets_target, mine_block, retarget_difficulty
 from pychain.core.transaction import COINBASE, Transaction, build_coinbase_transaction
 from pychain.core.wallet import WalletError, is_valid_address
 
@@ -37,9 +38,7 @@ class BlockValidationError(ValueError):
 
     def __init__(self, error: ValidationError) -> None:
         self.validation_error = error
-        super().__init__(
-            f"block {error.block_index} failed {error.rule}: {error.message}"
-        )
+        super().__init__(f"block {error.block_index} failed {error.rule}: {error.message}")
 
 
 def chain_weight(chain: Sequence[Block]) -> int:
@@ -52,6 +51,84 @@ def compare_chains(current: Sequence[Block], candidate: Sequence[Block]) -> bool
     return chain_weight(candidate) > chain_weight(current)
 
 
+def apply_transaction(
+    transaction: Transaction,
+    balances: dict[str, int],
+    nonces: dict[str, int],
+    *,
+    block_index: int,
+    chain_id: str,
+    allow_coinbase: bool = False,
+) -> ValidationError | None:
+    """Validate and apply one transaction; this is the sole confirmed-state mutation path."""
+    if (
+        not transaction._has_valid_fields()
+        or transaction.version != GENESIS_BLOCK.version
+        or transaction.chain_id != chain_id
+    ):
+        return ValidationError(
+            block_index,
+            "transaction_chain_id",
+            "transaction version or chain_id does not match the ledger",
+        )
+    if transaction.is_coinbase:
+        if not allow_coinbase:
+            return ValidationError(
+                block_index,
+                "coinbase_count",
+                "coinbase transactions are only permitted at position zero",
+            )
+        if (
+            transaction.transaction_type != "coinbase"
+            or transaction.sender_public_key != COINBASE
+            or transaction.amount != BLOCK_REWARD
+            or not is_valid_address(transaction.recipient)
+            or transaction.signature != ""
+            or transaction.nonce != 0
+        ):
+            return ValidationError(
+                block_index,
+                "coinbase",
+                "coinbase must be unsigned, pay exactly the block reward, "
+                "and have a valid recipient",
+            )
+        balances[transaction.recipient] = (
+            balances.get(transaction.recipient, 0) + transaction.amount
+        )
+        return None
+
+    if transaction.transaction_type != "transfer":
+        return ValidationError(block_index, "transaction_type", "unsupported transaction type")
+    try:
+        sender = transaction.sender_address
+    except WalletError as error:
+        return ValidationError(block_index, "sender_public_key", str(error))
+    if not transaction.verify(expected_sender_address=sender, expected_chain_id=chain_id):
+        return ValidationError(
+            block_index,
+            "signature",
+            f"transaction {transaction.tx_id} has an invalid signature or sender identity",
+        )
+    expected_nonce = nonces.get(sender, 0)
+    if transaction.nonce != expected_nonce:
+        return ValidationError(
+            block_index,
+            "nonce",
+            f"sender {sender} expected nonce {expected_nonce}, got {transaction.nonce}",
+        )
+    sender_balance = balances.get(sender, 0)
+    if sender_balance < transaction.amount:
+        return ValidationError(
+            block_index,
+            "balance",
+            f"sender {sender} has balance {sender_balance}, needs {transaction.amount}",
+        )
+    balances[sender] = sender_balance - transaction.amount
+    balances[transaction.recipient] = balances.get(transaction.recipient, 0) + transaction.amount
+    nonces[sender] = expected_nonce + 1
+    return None
+
+
 class Blockchain:
     """A validated block sequence with account balances and next transaction nonces."""
 
@@ -60,8 +137,10 @@ class Blockchain:
         chain: Sequence[Block] | None = None,
         *,
         clock: Clock = time.time,
+        consensus: ConsensusEngine = DEFAULT_CONSENSUS,
     ) -> None:
         self._clock = clock
+        self.consensus = consensus
         self.chain = deepcopy(list(chain) if chain is not None else [GENESIS_BLOCK])
         self.balances: dict[str, int] = {}
         self.nonces: dict[str, int] = {}
@@ -81,8 +160,8 @@ class Blockchain:
 
     @property
     def total_work(self) -> int:
-        """Return cumulative proof-of-work for the current chain."""
-        return chain_weight(self.chain)
+        """Return the configured consensus engine's cumulative chain score."""
+        return self.consensus.score(self.chain)
 
     def balance_of(self, address: str) -> int:
         """Return the confirmed balance of an address, or zero if it is unknown."""
@@ -100,7 +179,7 @@ class Blockchain:
             return previous_blocks[-1].difficulty_bits
         interval_start = previous_blocks[-RETARGET_INTERVAL].timestamp
         elapsed = block.timestamp - interval_start
-        return retarget_difficulty(
+        return self.consensus.expected_difficulty(
             previous_blocks[-1].difficulty_bits,
             elapsed,
             interval=RETARGET_INTERVAL,
@@ -108,6 +187,8 @@ class Blockchain:
         )
 
     def _validate_genesis(self, block: Block) -> ValidationError | None:
+        if block.version != GENESIS_BLOCK.version or block.chain_id != CHAIN_ID:
+            return ValidationError(0, "genesis", "genesis version or chain_id is unsupported")
         if block.to_dict() != GENESIS_BLOCK.to_dict():
             return ValidationError(
                 0,
@@ -117,7 +198,7 @@ class Blockchain:
         if not block.has_valid_hash():
             return ValidationError(0, "hash", "genesis header hash does not match")
         try:
-            target_met = meets_target(block.hash, block.difficulty_bits)
+            target_met = self.consensus.validate(block)
         except ValueError as error:
             return ValidationError(block.index, "difficulty_bits", str(error))
         if not target_met:
@@ -145,6 +226,13 @@ class Blockchain:
                 f"expected index {expected_index}, got {block.index}",
             )
 
+        if block.version != GENESIS_BLOCK.version or block.chain_id != CHAIN_ID:
+            return ValidationError(
+                block.index,
+                "block_chain_id",
+                "block version or chain_id does not match the ledger",
+            )
+
         previous = previous_blocks[-1]
         if not isinstance(block.previous_hash, str) or block.previous_hash != previous.hash:
             return ValidationError(
@@ -154,10 +242,7 @@ class Blockchain:
             )
         if not isinstance(block.merkle_root, str):
             return ValidationError(block.index, "merkle_root", "merkle_root must be text")
-        if (
-            not isinstance(block.difficulty_bits, int)
-            or isinstance(block.difficulty_bits, bool)
-        ):
+        if not isinstance(block.difficulty_bits, int) or isinstance(block.difficulty_bits, bool):
             return ValidationError(
                 block.index,
                 "difficulty_bits",
@@ -168,7 +253,7 @@ class Blockchain:
         if not block.has_valid_hash():
             return ValidationError(block.index, "hash", "stored hash does not match block header")
         try:
-            target_met = meets_target(block.hash, block.difficulty_bits)
+            target_met = self.consensus.validate(block)
         except ValueError as error:
             return ValidationError(block.index, "difficulty_bits", str(error))
         if not target_met:
@@ -275,68 +360,20 @@ class Blockchain:
                 )
             block_tx_ids.add(transaction.tx_id)
 
-        coinbase = transactions[0]
-        if (
-            coinbase.sender_public_key != COINBASE
-            or coinbase.amount != BLOCK_REWARD
-            or not is_valid_address(coinbase.recipient)
-            or coinbase.signature != ""
-        ):
-            return ValidationError(
-                block.index,
-                "coinbase",
-                "coinbase must be unsigned, pay exactly the block reward, "
-                "and have a valid recipient",
-            )
-
         # Apply to working copies so failed blocks cannot partially change chain state.
         next_balances = balances.copy()
         next_nonces = nonces.copy()
-        next_balances[coinbase.recipient] = (
-            next_balances.get(coinbase.recipient, 0) + coinbase.amount
-        )
-
-        for transaction in transactions[1:]:
-            if transaction.is_coinbase:
-                return ValidationError(
-                    block.index,
-                    "coinbase_count",
-                    "coinbase transactions are only permitted at position zero",
-                )
-            try:
-                sender = transaction.sender_address
-            except WalletError as error:
-                return ValidationError(
-                    block.index,
-                    "sender_public_key",
-                    str(error),
-                )
-            if not transaction.verify(expected_sender_address=sender):
-                return ValidationError(
-                    block.index,
-                    "signature",
-                    f"transaction {transaction.tx_id} has an invalid signature or sender identity",
-                )
-
-            expected_nonce = next_nonces.get(sender, 0)
-            if transaction.nonce != expected_nonce:
-                return ValidationError(
-                    block.index,
-                    "nonce",
-                    f"sender {sender} expected nonce {expected_nonce}, got {transaction.nonce}",
-                )
-            sender_balance = next_balances.get(sender, 0)
-            if sender_balance < transaction.amount:
-                return ValidationError(
-                    block.index,
-                    "balance",
-                    f"sender {sender} has balance {sender_balance}, needs {transaction.amount}",
-                )
-            next_balances[sender] = sender_balance - transaction.amount
-            next_balances[transaction.recipient] = (
-                next_balances.get(transaction.recipient, 0) + transaction.amount
+        for position, transaction in enumerate(transactions):
+            apply_error = apply_transaction(
+                transaction,
+                next_balances,
+                next_nonces,
+                block_index=block.index,
+                chain_id=CHAIN_ID,
+                allow_coinbase=position == 0,
             )
-            next_nonces[sender] = expected_nonce + 1
+            if apply_error is not None:
+                return apply_error
 
         balances.clear()
         balances.update(next_balances)
@@ -369,9 +406,9 @@ class Blockchain:
                 or block.index != position
             ):
                 return ValidationError(
-                    block.index if isinstance(block.index, int) and not isinstance(
-                        block.index, bool
-                    ) else position,
+                    block.index
+                    if isinstance(block.index, int) and not isinstance(block.index, bool)
+                    else position,
                     "index",
                     f"expected index {position}, got {block.index}",
                 )
@@ -432,15 +469,33 @@ class Blockchain:
         )
         if error is not None:
             raise BlockValidationError(error)
-        self.chain.append(block)
+        try:
+            finalized_block = self.consensus.finalize(block)
+        except ValueError as finalize_error:
+            raise BlockValidationError(
+                ValidationError(block.index, "consensus_finalize", str(finalize_error))
+            ) from finalize_error
+        if finalized_block.to_dict() != block.to_dict():
+            raise BlockValidationError(
+                ValidationError(
+                    block.index,
+                    "consensus_finalize",
+                    "consensus finalization changed the validated block",
+                )
+            )
+        self.chain.append(finalized_block)
         self.balances = balances
         self.nonces = nonces
 
     def replace_chain(self, candidate: Sequence[Block]) -> bool:
         """Replace the current chain only when a fully validated candidate has more work."""
         candidate_blocks = deepcopy(list(candidate))
-        candidate_chain = Blockchain(candidate_blocks, clock=self._clock)
-        if not compare_chains(self.chain, candidate_chain.chain):
+        candidate_chain = Blockchain(
+            candidate_blocks,
+            clock=self._clock,
+            consensus=self.consensus,
+        )
+        if not self.consensus.score(candidate_chain.chain) > self.consensus.score(self.chain):
             return False
         self.chain = candidate_chain.chain
         self.balances = candidate_chain.balances
@@ -462,7 +517,11 @@ class Blockchain:
         )
         if not isinstance(block_timestamp, int) or isinstance(block_timestamp, bool):
             raise ValueError("timestamp must be an integer")
-        coinbase = build_coinbase_transaction(miner_address, timestamp=block_timestamp)
+        coinbase = build_coinbase_transaction(
+            miner_address,
+            timestamp=block_timestamp,
+            chain_id=self.tip.chain_id,
+        )
         transaction_dicts: list[dict[str, object]] = [
             coinbase.to_dict(),
             *(transaction.to_dict() for transaction in transactions),
@@ -478,6 +537,7 @@ class Blockchain:
             ),
             difficulty_bits=self.tip.difficulty_bits,
             transactions=transaction_dicts,
+            chain_id=self.tip.chain_id,
         )
         block.difficulty_bits = self._expected_difficulty(block, self.chain)
         block.hash = block.calculate_hash()
@@ -497,7 +557,7 @@ class Blockchain:
             transactions,
             timestamp=timestamp,
         )
-        result = mine_block(
+        result = self.consensus.propose(
             candidate,
             cancel_event if cancel_event is not None else Event(),
             timestamp_fn=self._clock,

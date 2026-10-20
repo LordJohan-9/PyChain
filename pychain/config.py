@@ -1,6 +1,11 @@
 """Shared PyChain protocol and node configuration constants."""
 
 BLOCK_REWARD = 50
+CHAIN_ID = "pychain-local-v1"
+SERIALIZATION_VERSION = 1
+TRANSFER_TYPE = "transfer"
+COINBASE_TYPE = "coinbase"
+SECP256K1_SCHEME = "secp256k1"
 TARGET_BLOCK_TIME = 10
 RETARGET_INTERVAL = 10
 INITIAL_DIFFICULTY_BITS = 16

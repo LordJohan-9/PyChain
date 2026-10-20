@@ -42,6 +42,18 @@ def test_wallet_load_rejects_address_key_mismatch(tmp_path) -> None:
         Wallet.load(wallet_path)
 
 
+def test_wallet_load_rejects_unsupported_version(tmp_path) -> None:
+    wallet = Wallet.generate()
+    wallet_path = tmp_path / "wallet.json"
+    wallet_path.write_text(
+        json.dumps({**wallet.to_dict(), "version": 2}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WalletError, match="unsupported wallet version"):
+        Wallet.load(wallet_path)
+
+
 def test_wallet_load_rejects_public_private_key_mismatch(tmp_path) -> None:
     wallet = Wallet.generate()
     other_wallet = Wallet.generate()
@@ -49,6 +61,8 @@ def test_wallet_load_rejects_public_private_key_mismatch(tmp_path) -> None:
     wallet_path.write_text(
         json.dumps(
             {
+                "version": 1,
+                "signature_scheme": wallet.signature_scheme,
                 "private_key": wallet.private_key,
                 "public_key": other_wallet.public_key,
                 "address": other_wallet.address,

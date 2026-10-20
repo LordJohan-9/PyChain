@@ -1,5 +1,7 @@
 """Pydantic request and response models for the node REST API."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -8,6 +10,10 @@ class StrictModel(BaseModel):
 
 
 class TransactionRequest(StrictModel):
+    version: int
+    chain_id: str
+    type: Literal["transfer"]
+    signature_scheme: str
     sender_public_key: str
     recipient: str
     amount: int = Field(gt=0)
@@ -23,6 +29,10 @@ class WalletSendRequest(StrictModel):
 
 
 class TransactionResponse(StrictModel):
+    version: int
+    chain_id: str
+    type: str
+    signature_scheme: str
     sender_public_key: str
     recipient: str
     amount: int
@@ -35,6 +45,8 @@ class TransactionResponse(StrictModel):
 
 
 class BlockResponse(StrictModel):
+    version: int
+    chain_id: str
     index: int
     timestamp: int
     previous_hash: str
@@ -46,6 +58,7 @@ class BlockResponse(StrictModel):
 
 
 class ChainResponse(StrictModel):
+    version: int
     blocks: list[BlockResponse]
     height: int
     total_work: int
@@ -98,6 +111,7 @@ class PeerAddRequest(StrictModel):
 
 
 class PeerInfo(StrictModel):
+    version: int
     node_id: str
     url: str
     height: int
@@ -112,27 +126,29 @@ class PeersResponse(StrictModel):
 
 
 class PeerHelloRequest(StrictModel):
-    node_id: str
-    url: str
-    height: int
-    total_work: int
+    version: int
+    message_type: Literal["hello"]
+    sender_id: str
+    payload: dict[str, object]
 
 
 class PeerHelloResponse(StrictModel):
-    node_id: str
-    url: str
-    height: int
-    total_work: int
-    peers: list[PeerInfo]
+    version: int
+    message_type: Literal["hello"]
+    sender_id: str
+    payload: dict[str, object]
 
 
 class PeerMessage(StrictModel):
+    version: int
+    message_type: Literal["transaction", "block"]
+    sender_id: str
     sender_url: str
-    transaction: dict[str, object] | None = None
-    block: dict[str, object] | None = None
+    payload: dict[str, object]
 
 
 class PeerMessageResponse(StrictModel):
+    version: int
     accepted: bool
 
 

@@ -11,6 +11,8 @@ from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
+from pychain.config import SERIALIZATION_VERSION
+from pychain.core.consensus import DEFAULT_CONSENSUS, ConsensusEngine
 from pychain.core.mempool import MempoolError
 from pychain.core.transaction import Transaction
 from pychain.core.wallet import is_valid_address
@@ -21,6 +23,7 @@ from pychain.node.hardening import (
     P2PRequestLimitMiddleware,
 )
 from pychain.node.miner import MiningCancelled, MiningError, NodeRuntime
+from pychain.node.p2p import P2PMessage
 from pychain.node.schemas import (
     BalanceResponse,
     BlockResponse,
@@ -54,12 +57,13 @@ def create_app(
     p2p_max_body_bytes: int = MAX_P2P_BODY_BYTES,
     p2p_requests_per_window: int = P2P_REQUESTS_PER_WINDOW,
     p2p_rate_window_seconds: int = P2P_RATE_WINDOW_SECONDS,
+    consensus: ConsensusEngine = DEFAULT_CONSENSUS,
 ) -> FastAPI:
     """Create an API application with an isolated on-disk node data directory."""
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        runtime = NodeRuntime(data_dir, port=port)
+        runtime = NodeRuntime(data_dir, port=port, consensus=consensus)
         application.state.runtime = runtime
         runtime.peer_manager.start()
         try:
@@ -126,6 +130,7 @@ def create_app(
         with runtime.state_lock:
             chain = runtime.blockchain
             return ChainResponse(
+                version=SERIALIZATION_VERSION,
                 blocks=[BlockResponse.model_validate(block.to_dict()) for block in chain.chain],
                 height=chain.height,
                 total_work=chain.total_work,
@@ -275,27 +280,56 @@ def create_app(
     @application.post("/p2p/hello", response_model=PeerHelloResponse)
     async def p2p_hello(payload: PeerHelloRequest, request: Request) -> PeerHelloResponse:
         runtime = runtime_for(request)
-        if payload.height < 0 or payload.total_work < 0:
+        try:
+            message = P2PMessage(
+                payload.message_type,
+                payload.sender_id,
+                payload.payload,
+                payload.version,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        hello = message.payload
+        node_id = hello.get("node_id")
+        peer_url = hello.get("url")
+        height = hello.get("height")
+        total_work = hello.get("total_work")
+        if (
+            message.message_type != "hello"
+            or node_id != message.sender_id
+            or not isinstance(peer_url, str)
+            or not isinstance(height, int)
+            or isinstance(height, bool)
+            or not isinstance(total_work, int)
+            or isinstance(total_work, bool)
+        ):
+            raise HTTPException(status_code=400, detail="malformed P2P hello payload")
+        if height < 0 or total_work < 0:
             raise HTTPException(status_code=400, detail="height and total_work cannot be negative")
         try:
             await run_in_threadpool(
                 runtime.peer_manager.record_hello,
-                payload.node_id,
-                payload.url,
-                payload.height,
-                payload.total_work,
+                message.sender_id,
+                peer_url,
+                height,
+                total_work,
             )
             await run_in_threadpool(runtime.peer_manager.persist_peers)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         peers = await run_in_threadpool(lambda: runtime.peer_manager.peers)
-        return PeerHelloResponse(
-            node_id=runtime.node_id,
-            url=runtime.url,
-            height=runtime.blockchain.height,
-            total_work=runtime.blockchain.total_work,
-            peers=[PeerInfo.model_validate(peer.to_dict()) for peer in peers],
+        response_message = P2PMessage(
+            "hello",
+            runtime.node_id,
+            {
+                "node_id": runtime.node_id,
+                "url": runtime.url,
+                "height": runtime.blockchain.height,
+                "total_work": runtime.blockchain.total_work,
+                "peers": [peer.to_dict() for peer in peers],
+            },
         )
+        return PeerHelloResponse.model_validate(response_message.to_dict())
 
     @application.post("/p2p/transactions", response_model=PeerMessageResponse)
     async def p2p_transaction(
@@ -303,14 +337,23 @@ def create_app(
         request: Request,
     ) -> PeerMessageResponse:
         runtime = runtime_for(request)
-        if payload.transaction is None:
-            raise HTTPException(status_code=400, detail="transaction payload is required")
         try:
-            if not runtime.peer_manager.has_peer(payload.sender_url):
+            message = P2PMessage(
+                payload.message_type,
+                payload.sender_id,
+                payload.payload,
+                payload.version,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if message.message_type != "transaction":
+            raise HTTPException(status_code=400, detail="transaction message type is required")
+        try:
+            if not runtime.peer_manager.is_known_peer(payload.sender_url, message.sender_id):
                 raise HTTPException(status_code=403, detail="sender is not a known peer")
             accepted = await run_in_threadpool(
                 runtime.receive_transaction,
-                payload.transaction,
+                message.payload,
                 payload.sender_url,
             )
         except HTTPException:
@@ -318,7 +361,7 @@ def create_app(
         except (ValueError, MempoolError) as error:
             await run_in_threadpool(runtime.peer_manager.strike, payload.sender_url)
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return PeerMessageResponse(accepted=accepted)
+        return PeerMessageResponse(version=SERIALIZATION_VERSION, accepted=accepted)
 
     @application.post("/p2p/blocks", response_model=PeerMessageResponse)
     async def p2p_block(
@@ -326,21 +369,30 @@ def create_app(
         request: Request,
     ) -> PeerMessageResponse:
         runtime = runtime_for(request)
-        if payload.block is None:
-            raise HTTPException(status_code=400, detail="block payload is required")
         try:
-            if not runtime.peer_manager.has_peer(payload.sender_url):
+            message = P2PMessage(
+                payload.message_type,
+                payload.sender_id,
+                payload.payload,
+                payload.version,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        if message.message_type != "block":
+            raise HTTPException(status_code=400, detail="block message type is required")
+        try:
+            if not runtime.peer_manager.is_known_peer(payload.sender_url, message.sender_id):
                 raise HTTPException(status_code=403, detail="sender is not a known peer")
             accepted = await run_in_threadpool(
                 runtime.receive_block,
-                payload.block,
+                message.payload,
                 payload.sender_url,
             )
         except HTTPException:
             raise
         except (ValueError, TypeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return PeerMessageResponse(accepted=accepted)
+        return PeerMessageResponse(version=SERIALIZATION_VERSION, accepted=accepted)
 
     @application.get("/balances/{address}", response_model=BalanceResponse)
     async def get_balance(address: str, request: Request) -> BalanceResponse:
