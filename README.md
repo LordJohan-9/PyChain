@@ -25,12 +25,13 @@ Start three connected nodes and open the browser UI:
 python scripts/run_demo.py
 ```
 
-The launcher creates `data/demo/node1`, `data/demo/node2`, and
-`data/demo/node3`, waits for all nodes, connects the peers, and opens
+The launcher creates `data/demo-v1/node1`, `data/demo-v1/node2`, and
+`data/demo-v1/node3`, waits for all nodes, connects the peers, and opens
 `http://127.0.0.1:8000/ui`. Keep the launcher terminal open; press **Ctrl+C**
 there to stop the three nodes. Add `--no-browser` to start without opening a
-browser, or `--data-root PATH` to choose another data directory. Existing chain
-and wallet files are retained across runs.
+browser, or `--data-root PATH` to choose another data directory. Version 1
+uses a fresh `demo-v1` directory so older, unversioned demo files are left
+untouched; the new chain and wallet files are retained across runs.
 
 To start a single node instead:
 

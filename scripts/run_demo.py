@@ -11,6 +11,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PORTS = (8000, 8001, 8002)
+DEFAULT_DATA_ROOT = ROOT / "data" / "demo-v1"
 
 
 def wait_for_node(process: subprocess.Popen[bytes], port: int, timeout: float = 30.0) -> None:
@@ -58,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data-root",
         type=Path,
-        default=ROOT / "data" / "demo",
+        default=DEFAULT_DATA_ROOT,
         help="directory containing persistent data for the three nodes",
     )
     parser.add_argument(
